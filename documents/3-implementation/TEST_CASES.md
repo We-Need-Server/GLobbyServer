@@ -47,3 +47,17 @@
 | **TC-016**  | 만료된 Refresh Token으로 갱신 시도   | 1. 만료된 Refresh Token으로 `AuthService.RefreshToken` RPC 호출.                                         | 1. `Unauthenticated` gRPC 상태 코드를 포함한 에러를 받는다.                                                            | 예외 |
 | **TC-017**  | 유효하지 않은 Refresh Token으로 갱신 | 1. 데이터베이스에 없거나(예: 사용자가 모든 기기에서 로그아웃) 위조된 Refresh Token으로 RPC 호출. | 1. `Unauthenticated` gRPC 상태 코드를 포함한 에러를 받는다.                                                            | 예외 |
 | **TC-018**  | Access Token으로 갱신 시도         | 1. Access Token을 Refresh Token으로 착각하여 `AuthService.RefreshToken` RPC 호출.                      | 1. `InvalidArgument` 또는 `Unauthenticated` gRPC 상태 코드를 포함한 에러를 받는다. (토큰의 용도가 잘못되었음을 나타냄) | 예외 |
+
+---
+
+### 5. Redis - Refresh Token 관리 (New)
+
+| 테스트 ID | 시나리오                           | 테스트 단계                                                                                              | 예상 결과                                                                                                              | 구분 |
+| :-------- | :--------------------------------- | :------------------------------------------------------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------- | :--- |
+| **TC-019**  | Refresh Token Redis 저장 확인       | 1. 로그인 성공 후 Refresh Token 발급.<br>2. Redis에서 `GET refresh_token:{hash}` 실행.                   | 1. User ID가 반환된다.<br>2. TTL이 약 7일(604800초)로 설정되어 있다.                                                      | 정상 |
+| **TC-020**  | Refresh Token TTL 만료 확인         | 1. Refresh Token 저장 시 TTL을 1초로 설정.<br>2. 2초 대기 후 Redis 조회.                                | 1. Redis에서 해당 키가 존재하지 않는다 (자동 삭제됨).                                                                    | 정상 |
+| **TC-021**  | 로그아웃 시 Redis 토큰 삭제 확인     | 1. 로그인 후 Refresh Token 발급.<br>2. 로그아웃 API 호출.<br>3. Redis에서 해당 토큰 조회.               | 1. Redis에서 해당 토큰이 삭제되어 조회 결과가 `nil`이다.                                                                 | 정상 |
+| **TC-022**  | 다중 기기 로그인 - Token Set 확인    | 1. 동일 사용자로 2번 로그인 (다른 브라우저/기기 시뮬레이션).<br>2. Redis `SMEMBERS user_tokens:{user_id}` 실행. | 1. 2개의 서로 다른 token hash가 Set에 저장되어 있다.                                                                     | 정상 |
+| **TC-023**  | 중복 Refresh Token 저장 방지        | 1. 동일한 Refresh Token을 2번 저장 시도.                                                                  | 1. Redis `SET` 명령은 덮어쓰기되므로 문제없이 저장된다.<br>2. 중복 토큰 사용은 애플리케이션 레벨에서 방지해야 함.            | 엣지 |
+| **TC-024**  | 존재하지 않는 Refresh Token 조회    | 1. Redis에 없는 token hash로 `GET refresh_token:{invalid_hash}` 실행.                                    | 1. `nil` 값이 반환되어 인증 실패 처리된다.                                                                               | 예외 |
+| **TC-025**  | 전체 로그아웃 (모든 기기)           | 1. 동일 사용자로 3개 기기 로그인.<br>2. 전체 로그아웃 API 호출.<br>3. 각 Refresh Token으로 갱신 시도.    | 1. Redis에서 해당 사용자의 모든 token이 삭제된다.<br>2. 모든 갱신 시도가 실패한다.                                        | 정상 |

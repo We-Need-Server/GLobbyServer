@@ -19,9 +19,17 @@
 -   **요청 형식**: `application/x-www-form-urlencoded`
     -   `username` (string)
     -   `password` (string)
+-   **처리 로직**:
+    1.  MySQL에서 사용자 정보 조회 (`username` 기준)
+    2.  비밀번호 검증 (bcrypt)
+    3.  Access Token (JWT) 생성 (만료: 15분)
+    4.  Refresh Token (랜덤 문자열) 생성
+    5.  Refresh Token을 SHA256 해싱 후 Redis에 저장
+        -   `SET refresh_token:{hash} {user_id} EX 604800` (7일)
+        -   `SADD user_tokens:{user_id} {hash}`
 -   **성공 응답**: `302 Found`
-    -   `Set-Cookie`: `access_token=...; HttpOnly; Secure; SameSite=Strict`
-    -   `Set-Cookie`: `refresh_token=...; HttpOnly; Secure; SameSite=Strict`
+    -   `Set-Cookie`: `access_token=...; HttpOnly; Secure; SameSite=Strict; Max-Age=900` (15분)
+    -   `Set-Cookie`: `refresh_token=...; HttpOnly; Secure; SameSite=Strict; Max-Age=604800` (7일)
     -   `Location`: `/profile`
 -   **실패 응답**: `401 Unauthorized`
     -   Body: 에러 메시지를 포함한 `login.html` 렌더링 결과
@@ -52,8 +60,16 @@
 
 ### **`POST /logout`**
 -   **설명**: 사용자 로그아웃을 처리합니다.
+-   **처리 로직**:
+    1.  쿠키에서 `refresh_token` 값 추출
+    2.  Refresh Token을 SHA256 해싱
+    3.  Redis에서 토큰 삭제
+        -   `DEL refresh_token:{hash}`
+        -   `SREM user_tokens:{user_id} {hash}`
+    4.  쿠키 만료 처리
 -   **성공 응답**: `302 Found`
-    -   `Set-Cookie`: `access_token`과 `refresh_token`을 만료시키는 헤더
+    -   `Set-Cookie`: `access_token=; Max-Age=0` (즉시 만료)
+    -   `Set-Cookie`: `refresh_token=; Max-Age=0` (즉시 만료)
     -   `Location`: `/`
 
 ---
@@ -106,6 +122,21 @@ message RefreshTokenResponse {
   // 새로 발급된 Access Token
   string access_token = 1;
 }
+
+// --- RPC 처리 로직 ---
+// ValidateToken RPC:
+//   1. JWT 서명 검증
+//   2. 만료 시각 확인
+//   3. user_id 추출 후 반환
+//
+// RefreshToken RPC:
+//   1. Refresh Token을 SHA256 해싱
+//   2. Redis에서 조회: GET refresh_token:{hash}
+//   3. User ID 조회 성공 시:
+//      - 새로운 Access Token (JWT) 생성
+//      - 반환
+//   4. 조회 실패 시 (토큰 없음 또는 만료):
+//      - Unauthenticated 에러 반환
 ```
 
 ---
